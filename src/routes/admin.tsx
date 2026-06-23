@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
   Plus, LogOut, Users as UsersIcon, FileText, BarChart3,
-  Eye, Trash2, ToggleLeft, ToggleRight,
+  Eye, Trash2, ToggleLeft, ToggleRight, Image, BookOpen,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,10 @@ import { getDashboardStats } from "@/lib/submissions.functions";
 import {
   listStudents, createStudent, toggleStudentDisabled, deleteStudent,
 } from "@/lib/users.functions";
+import {
+  uploadMeme, removeMeme, getMemeUrl,
+} from "@/lib/meme.functions";
+import { getAssignments, createAssignment, deleteAssignment } from "@/lib/assignments.functions";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPanel,
@@ -60,15 +64,19 @@ function AdminPanel() {
 
       <div className="mx-auto mt-8 max-w-6xl">
         <Tabs defaultValue="dashboard">
-          <TabsList className="glass border border-white/10 bg-transparent">
+          <TabsList className="glass border border-white/10 bg-transparent flex-wrap h-auto p-1">
             <TabsTrigger value="dashboard" className="gap-2"><BarChart3 className="h-4 w-4" /> Dashboard</TabsTrigger>
             <TabsTrigger value="forms" className="gap-2"><FileText className="h-4 w-4" /> Forms</TabsTrigger>
             <TabsTrigger value="students" className="gap-2"><UsersIcon className="h-4 w-4" /> Students</TabsTrigger>
+            <TabsTrigger value="assignments" className="gap-2"><BookOpen className="h-4 w-4" /> Assignments</TabsTrigger>
+            <TabsTrigger value="meme" className="gap-2"><Image className="h-4 w-4" /> Meme</TabsTrigger>
           </TabsList>
 
           <TabsContent value="dashboard" className="mt-6"><DashboardTab /></TabsContent>
           <TabsContent value="forms" className="mt-6"><FormsTab /></TabsContent>
           <TabsContent value="students" className="mt-6"><StudentsTab /></TabsContent>
+          <TabsContent value="assignments" className="mt-6"><AssignmentsTab /></TabsContent>
+          <TabsContent value="meme" className="mt-6"><MemeTab /></TabsContent>
         </Tabs>
       </div>
     </main>
@@ -496,6 +504,257 @@ function StudentsTab() {
         </table>
       </div>
       <p className="text-xs text-muted-foreground">PINs are hashed in the database and cannot be viewed after creation. Reset by deleting and re-adding the student.</p>
+    </div>
+  );
+}
+
+/* ============== MEME OF THE DAY ============== */
+function MemeTab() {
+  const qc = useQueryClient();
+  const [uploading, setUploading] = useState(false);
+  const fetchMeme = useServerFn(getMemeUrl);
+  const doUpload = useServerFn(uploadMeme);
+  const doRemove = useServerFn(removeMeme);
+
+  const { data: memeUrl, isLoading } = useQuery({
+    queryKey: ["admin-meme"],
+    queryFn: () => fetchMeme(),
+  });
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("File is too large (max 5MB)");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64String = (reader.result as string).split(",")[1];
+        await doUpload({
+          data: {
+            base64: base64String,
+            mimeType: file.type,
+            fileName: file.name,
+          },
+        });
+        qc.invalidateQueries({ queryKey: ["admin-meme"] });
+        qc.invalidateQueries({ queryKey: ["meme-of-day"] });
+        toast.success("Meme uploaded successfully");
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error(err.message ?? "Failed to upload meme");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (!confirm("Remove the current meme?")) return;
+    setUploading(true);
+    try {
+      await doRemove();
+      qc.invalidateQueries({ queryKey: ["admin-meme"] });
+      qc.invalidateQueries({ queryKey: ["meme-of-day"] });
+      toast.success("Meme removed");
+    } catch {
+      toast.error("Failed to remove meme");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <div className="glass rounded-2xl p-6 space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold">Meme of the Day</h2>
+          <p className="text-sm text-muted-foreground">
+            This image will be shown on the student dashboard homepage. Uploading a new one replaces the old one.
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-4 min-h-[250px] flex items-center justify-center">
+          {isLoading ? (
+            <p className="text-muted-foreground animate-pulse">Loading...</p>
+          ) : memeUrl ? (
+            <div className="relative">
+              <img src={memeUrl} alt="Current meme" className="max-h-[400px] rounded-lg" />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center text-muted-foreground gap-2">
+              <Image className="h-8 w-8 opacity-50" />
+              <p>No meme uploaded currently</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-4">
+          <Button asChild disabled={uploading} className="gap-2 bg-gradient-to-r from-primary to-accent text-primary-foreground glow cursor-pointer">
+            <label>
+              <Plus className="h-4 w-4" />
+              {uploading ? "Uploading..." : "Upload New Image"}
+              <input type="file" accept="image/*" className="hidden" onChange={handleFile} disabled={uploading} />
+            </label>
+          </Button>
+
+          {memeUrl && (
+            <Button variant="outline" onClick={handleRemove} disabled={uploading} className="border-destructive/30 text-destructive hover:bg-destructive/10">
+              <Trash2 className="h-4 w-4 mr-2" /> Remove Image
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============== ASSIGNMENTS ============== */
+function AssignmentsTab() {
+  const qc = useQueryClient();
+  const [isCreating, setIsCreating] = useState(false);
+  const [title, setTitle] = useState("");
+  const [instruction, setInstruction] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const fetchAssignments = useServerFn(getAssignments);
+  const doCreate = useServerFn(createAssignment);
+  const doDelete = useServerFn(deleteAssignment);
+
+  const { data: assignments, isLoading } = useQuery({
+    queryKey: ["admin-assignments"],
+    queryFn: () => fetchAssignments(),
+  });
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim() || !instruction.trim()) return toast.error("Title and Instruction are required.");
+    setSubmitting(true);
+    try {
+      let base64Image, mimeType, fileName;
+      if (imageFile) {
+        const buffer = await imageFile.arrayBuffer();
+        base64Image = Buffer.from(buffer).toString("base64");
+        mimeType = imageFile.type;
+        fileName = imageFile.name;
+      }
+
+      await doCreate({
+        data: {
+          title,
+          instruction,
+          deadline_at: deadline ? new Date(deadline).toISOString() : null,
+          base64Image,
+          mimeType,
+          fileName,
+        }
+      });
+      toast.success("Assignment created!");
+      setIsCreating(false);
+      setTitle(""); setInstruction(""); setDeadline(""); setImageFile(null);
+      qc.invalidateQueries({ queryKey: ["admin-assignments"] });
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm("Delete this assignment?")) return;
+    try {
+      await doDelete({ data: { id } });
+      toast.success("Deleted successfully.");
+      qc.invalidateQueries({ queryKey: ["admin-assignments"] });
+    } catch (err: any) {
+      toast.error(err.message);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold">Class Assignments</h2>
+          <p className="text-sm text-muted-foreground">Post tasks or activities for students.</p>
+        </div>
+        <Button onClick={() => setIsCreating(true)} className="gap-2 bg-primary text-primary-foreground">
+          <Plus className="h-4 w-4" /> New Assignment
+        </Button>
+      </div>
+
+      <Dialog open={isCreating} onOpenChange={setIsCreating}>
+        <DialogContent className="glass-strong border-white/10 sm:max-w-[500px]">
+          <form onSubmit={handleCreate}>
+            <DialogHeader>
+              <DialogTitle>Create Assignment</DialogTitle>
+              <DialogDescription>Add a new assignment for your students.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label>Title</Label>
+                <Input value={title} onChange={e => setTitle(e.target.value)} required placeholder="e.g., Math Homework 5" />
+              </div>
+              <div className="grid gap-2">
+                <Label>Instructions</Label>
+                <Textarea value={instruction} onChange={e => setInstruction(e.target.value)} required rows={4} placeholder="Describe the task..." />
+              </div>
+              <div className="grid gap-2">
+                <Label>Deadline (Optional)</Label>
+                <Input type="datetime-local" value={deadline} onChange={e => setDeadline(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label>Attach Image (Optional)</Label>
+                <Input type="file" accept="image/*" onChange={e => setImageFile(e.target.files?.[0] || null)} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setIsCreating(false)}>Cancel</Button>
+              <Button type="submit" disabled={submitting} className="bg-primary">{submitting ? "Creating..." : "Create"}</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {isLoading ? (
+        <div className="glass rounded-2xl p-8 text-center animate-pulse">Loading...</div>
+      ) : assignments?.length === 0 ? (
+        <div className="glass rounded-2xl p-12 text-center text-muted-foreground">
+          <BookOpen className="mx-auto mb-4 h-12 w-12 opacity-20" />
+          <p>No assignments posted yet.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          {assignments?.map((a: any) => (
+            <div key={a.id} className="glass rounded-2xl p-6 flex flex-col md:flex-row md:items-start justify-between gap-4">
+              <div>
+                <h3 className="font-bold text-lg">{a.title}</h3>
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap mt-1">{a.instruction}</p>
+                {a.deadline_at && (
+                  <p className="text-xs text-primary mt-2 font-medium">
+                    Deadline: {new Date(a.deadline_at).toLocaleString()}
+                  </p>
+                )}
+                {a.image_url && (
+                  <a href={a.image_url} target="_blank" rel="noreferrer" className="text-xs text-blue-400 mt-2 block underline hover:opacity-80">
+                    <img src={a.image_url} alt="Attached image" className="max-h-32 mt-2 rounded-lg object-contain" />
+                  </a>
+                )}
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => handleDelete(a.id)} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

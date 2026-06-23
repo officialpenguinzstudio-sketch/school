@@ -48,8 +48,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Quiz Portal — Premium School Testing" },
-      { name: "description", content: "A premium, customizable quiz & test portal for schools." },
+      { title: "12 — Archimedes Section Website" },
+      { name: "description", content: "Section dashboard for 12 — Archimedes, Calibungan High School." },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

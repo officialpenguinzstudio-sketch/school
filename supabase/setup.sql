@@ -79,3 +79,47 @@ INSERT INTO public.users (name, role, pin_hash) VALUES (
   'Demo Student', 'student',
   '$2b$10$Wn46KLghYezxmatd3CuNvuGvgQVa1c1nD0cv0iw3yfp30uLF3WN56'
 );
+
+-- ============================================================
+-- 5. ASSIGNMENTS
+-- ============================================================
+
+CREATE TABLE public.assignments (
+  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  title TEXT NOT NULL,
+  instruction TEXT NOT NULL,
+  image_url TEXT,
+  deadline_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE public.assignment_completions (
+  assignment_id UUID NOT NULL REFERENCES public.assignments(id) ON DELETE CASCADE,
+  student_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (assignment_id, student_id)
+);
+
+ALTER TABLE public.assignments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.assignment_completions ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.assignments FROM anon, authenticated, PUBLIC;
+REVOKE ALL ON public.assignment_completions FROM anon, authenticated, PUBLIC;
+
+GRANT ALL ON public.assignments TO service_role;
+GRANT ALL ON public.assignment_completions TO service_role;
+
+-- Storage Bucket for Assignment Images
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('assignments', 'assignments', true)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE POLICY "Service role full access on assignments bucket"
+  ON storage.objects FOR ALL
+  TO service_role
+  USING (bucket_id = 'assignments');
+
+CREATE POLICY "Public read access on assignments bucket"
+  ON storage.objects FOR SELECT
+  TO anon, authenticated
+  USING (bucket_id = 'assignments');
